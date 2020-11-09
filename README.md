@@ -1,2 +1,3 @@
 # FacepalmCamera
-Facepalm to picture
+Facepalm to take a picture.  
+Manual burst mode only.
