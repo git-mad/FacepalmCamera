@@ -2,9 +2,13 @@ package club.gitmad.facepalmcamera.fragments
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
 import android.content.pm.PackageManager
 import android.media.Image
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
@@ -113,7 +117,6 @@ class CameraFragment : Fragment(R.layout.fragment_camera) {
                 if (isFacepalm(it)) {
                     binding.btnReady.text = "Not ready"
                     isReady = false
-                    binding.camera.takePicture()
                 }
             }.addOnFailureListener {
                 binding.btnReady.text = "Failed processing"
@@ -130,6 +133,28 @@ class CameraFragment : Fragment(R.layout.fragment_camera) {
         result.toFile(photoFile) {
             Log.d(TAG, "Saved to: ${Uri.fromFile(it)}")
             binding.btnReady.text = "Saved. Not ready."
+        }
+    }
+
+    private fun showNotification() {
+        createNotificationChannel()
+
+        // TODO: https://developer.android.com/training/notify-user/build-notification#builder
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val importance = NotificationManager.IMPORTANCE_DEFAULT
+            val channel = NotificationChannel(
+                "club.gitmad.facepalmcamera",
+                "Facepalm Camera",
+                importance
+            ).apply {
+                description = "Picture taken"
+            }
+            val notificationManager: NotificationManager =
+                requireContext().getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.createNotificationChannel(channel)
         }
     }
 
