@@ -138,6 +138,7 @@ class CameraFragment : Fragment(R.layout.fragment_camera) {
                     if (isReady && isFacepalm(it)) {
                         binding.btnReady.text = "Not ready"
                         isReady = false
+                        takePicture()
                     }
                 }.addOnFailureListener {
                     Log.e(TAG, "Pose detector processing failed", it)
