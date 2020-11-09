@@ -2,14 +2,21 @@ package club.gitmad.facepalmcamera.fragments
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.media.Image
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import club.gitmad.facepalmcamera.R
@@ -130,6 +137,42 @@ class CameraFragment : Fragment(R.layout.fragment_camera) {
         result.toFile(photoFile) {
             Log.d(TAG, "Saved to: ${Uri.fromFile(it)}")
             binding.btnReady.text = "Saved. Not ready."
+        }
+        result.toBitmap {
+            it?.let {
+                showNotification(it)
+            }
+        }
+    }
+
+    private fun showNotification(bitmap: Bitmap) {
+        createNotificationChannel()
+
+        val builder = NotificationCompat.Builder(requireContext(), "club.gitmad.facepalmcamera")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("Picture taken")
+            .setContentText("Cheese!")
+            .setStyle(NotificationCompat.BigPictureStyle().bigPicture(bitmap))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+
+        with(NotificationManagerCompat.from(requireContext())) {
+            notify(1337, builder.build())
+        }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val importance = NotificationManager.IMPORTANCE_DEFAULT
+            val channel = NotificationChannel(
+                "club.gitmad.facepalmcamera",
+                "Facepalm Camera",
+                importance
+            ).apply {
+                description = "Picture taken"
+            }
+            val notificationManager: NotificationManager =
+                requireContext().getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.createNotificationChannel(channel)
         }
     }
 
