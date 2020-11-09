@@ -3,14 +3,12 @@ package club.gitmad.facepalmcamera.fragments
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
+import android.media.Image
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
-import android.util.Size
 import android.view.View
 import android.widget.Toast
-import androidx.camera.core.*
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
@@ -21,6 +19,9 @@ import com.google.mlkit.vision.pose.Pose
 import com.google.mlkit.vision.pose.PoseDetection
 import com.google.mlkit.vision.pose.PoseLandmark
 import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
+import com.otaliastudios.cameraview.CameraListener
+import com.otaliastudios.cameraview.PictureResult
+import com.otaliastudios.cameraview.frame.Frame
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -34,7 +35,6 @@ class CameraFragment : Fragment(R.layout.fragment_camera) {
     private var _binding: FragmentCameraBinding? = null
     private val binding get() = _binding!!
 
-    private var imageCapture: ImageCapture? = null
     private val poseDetector by lazy {
         PoseDetection.getClient(
             PoseDetectorOptions.Builder()
@@ -49,9 +49,7 @@ class CameraFragment : Fragment(R.layout.fragment_camera) {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        if (allPermissionsGranted()) {
-            startCamera()
-        } else {
+        if (!allPermissionsGranted()) {
             ActivityCompat.requestPermissions(
                 requireActivity(),
                 REQUIRED_PERMISSIONS,
@@ -64,87 +62,74 @@ class CameraFragment : Fragment(R.layout.fragment_camera) {
 
         _binding = FragmentCameraBinding.bind(view)
 
-        binding.btnReady.setOnClickListener {
-            isReady = true
-            binding.btnReady.text = "Ready"
+        binding.apply {
+            camera.setLifecycleOwner(viewLifecycleOwner)
+            camera.addFrameProcessor { processFrame(it) }
+            camera.addCameraListener(object : CameraListener() {
+                override fun onPictureTaken(result: PictureResult) {
+                    super.onPictureTaken(result)
+                    savePicture(result)
+                }
+            })
+
+            btnReady.setOnClickListener {
+                isReady = true
+                btnReady.text = "Ready"
+            }
         }
     }
 
-    private fun takePicture() {
-        val imageCapture = imageCapture ?: return
+    private fun processFrame(frame: Frame) {
+        if (!isReady) return
 
+        val inputImage = when {
+            frame.dataClass === ByteArray::class.java -> {
+                InputImage.fromByteArray(
+                    frame.getData(),
+                    frame.size.width,
+                    frame.size.height,
+                    frame.rotationToView,
+                    InputImage.IMAGE_FORMAT_NV21
+                )
+            }
+            frame.dataClass === Image::class.java -> {
+                InputImage.fromMediaImage(frame.getData(), frame.rotationToView)
+            }
+            else -> {
+                null
+            }
+        }
+
+        if (inputImage != null) {
+            analyzeImage(inputImage)
+        }
+    }
+
+
+    @SuppressLint("UnsafeExperimentalUsageError")
+    private fun analyzeImage(inputImage: InputImage) {
+        poseDetector.process(inputImage)
+            .addOnSuccessListener {
+                if (isFacepalm(it)) {
+                    binding.btnReady.text = "Not ready"
+                    isReady = false
+                    binding.camera.takePicture()
+                }
+            }.addOnFailureListener {
+                binding.btnReady.text = "Failed processing"
+                Log.e(TAG, "Pose detector processing failed", it)
+            }
+    }
+
+    private fun savePicture(result: PictureResult) {
         val photoFile = File(
             outputDirectory,
             SimpleDateFormat(FILENAME_FORMAT, Locale.US)
                 .format(System.currentTimeMillis()) + ".jpg"
         )
-
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
-
-        imageCapture.takePicture(
-            outputOptions,
-            ContextCompat.getMainExecutor(requireContext()),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onError(exception: ImageCaptureException) {
-                    Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
-                }
-
-                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    val savedUri = Uri.fromFile(photoFile)
-                    Toast.makeText(requireContext(), "Success: $savedUri", Toast.LENGTH_SHORT)
-                        .show()
-                    Log.d(TAG, "Saved at: $savedUri")
-                }
-            }
-        )
-    }
-
-    private fun startCamera() {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(requireContext())
-        cameraProviderFuture.addListener({
-            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
-
-            val preview = Preview.Builder()
-                .build()
-                .also {
-                    it.setSurfaceProvider(binding.previewView.surfaceProvider)
-                }
-
-            imageCapture = ImageCapture.Builder().build()
-            val imageAnalyzer = ImageAnalysis.Builder()
-                .setTargetResolution(Size(1280, 720))
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-            imageAnalyzer.setAnalyzer(cameraExecutor, { analyzeImage(it) })
-
-            val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
-
-            try {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(this, cameraSelector, imageAnalyzer, preview)
-            } catch (e: Exception) {
-                Log.e(TAG, "Binding failed", e)
-            }
-        }, ContextCompat.getMainExecutor(requireContext()))
-    }
-
-    @SuppressLint("UnsafeExperimentalUsageError")
-    private fun analyzeImage(imageProxy: ImageProxy) {
-        imageProxy.image?.let {
-            InputImage.fromMediaImage(it, imageProxy.imageInfo.rotationDegrees)
-        }?.apply {
-            poseDetector.process(this)
-                .addOnSuccessListener {
-                    if (isReady && isFacepalm(it)) {
-                        binding.btnReady.text = "Not ready"
-                        isReady = false
-                        takePicture()
-                    }
-                }.addOnFailureListener {
-                    Log.e(TAG, "Pose detector processing failed", it)
-                }.addOnCompleteListener {
-                    imageProxy.close()
-                }
+        result.toFile(photoFile) {
+            Log.d(TAG, "Saved to: ${Uri.fromFile(it)}")
+            binding.btnReady.text = "Saved. Not ready."
         }
     }
 
@@ -185,9 +170,7 @@ class CameraFragment : Fragment(R.layout.fragment_camera) {
         grantResults: IntArray
     ) {
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
-            if (allPermissionsGranted()) {
-                startCamera()
-            } else {
+            if (!allPermissionsGranted()) {
                 Toast.makeText(requireContext(), "Permissions not granted :(.", Toast.LENGTH_SHORT)
                     .show()
                 requireActivity().finish()
